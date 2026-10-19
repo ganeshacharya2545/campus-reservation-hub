@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Campus Room Hub</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--ink:#0f172a;--mute:#64748b;--line:#e2e8f0;--brand:#1d4ed8;--ok:#16a34a;--ok-bg:#ecfdf3;--busy:#dc2626;--busy-bg:#fef2f2;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1220;--card:#111a2e;--ink:#e8edf7;--mute:#93a1b8;--line:#223052;--brand:#6b9bff;--ok:#4ade80;--ok-bg:#0f2a1c;--busy:#f87171;--busy-bg:#321517;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0b1220;--card:#111a2e;--ink:#e8edf7;--mute:#93a1b8;--line:#223052;--brand:#6b9bff;--ok:#4ade80;--ok-bg:#0f2a1c;--busy:#f87171;--busy-bg:#321517;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+.card{background:var(--card);border:1px solid var(--line);border-radius:1rem}
+.mute{color:var(--mute)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.8rem 1.1rem;border-radius:.75rem;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--ink);transition:all .2s;cursor:pointer}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.12)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn-danger{color:var(--busy);border-color:var(--busy)}
+.inp{width:100%;padding:.7rem .9rem;border-radius:.75rem;border:1px solid var(--line);background:var(--bg);color:var(--ink);outline:none;transition:border-color .2s}
+.inp:focus{border-color:var(--brand)}
+.fade{animation:fade .35s ease both}@keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.slot{padding:.5rem 0;border-radius:.6rem;border:1px solid var(--line);font-size:.85rem;font-weight:500;background:var(--bg);color:var(--ink);transition:all .15s;cursor:pointer}
+.slot:disabled{opacity:.35;cursor:not-allowed;text-decoration:line-through}
+.slot.sel{background:var(--brand);color:#fff;border-color:var(--brand)}
+.badge{padding:.15rem .6rem;border-radius:999px;font-size:.75rem;font-weight:600}
+.pulse{animation:pulse 2s infinite}@keyframes pulse{50%{opacity:.4}}
+</style>
+</head>
+<body>
+<div id="app" class="max-w-4xl mx-auto px-4 py-6 sm:py-10"></div>
+<div id="modal"></div>
+<div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-6 z-50"></div>
+<script>
+const KEY="campushub.v1", ROOM="Library Study Room 204";
+const pad=n=>String(n).padStart(2,"0");
+const today=()=>{const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())};
+const nowMin=()=>{const d=new Date();return d.getHours()*60+d.getMinutes()};
+const fmt=m=>{const h=Math.floor(m/60)%24;return (h%12||12)+":"+pad(m%60)+" "+(h>=12?"PM":"AM")};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let S=load();
+function load(){try{const r=JSON.parse(localStorage.getItem(KEY));if(r&&Array.isArray(r.bookings)){r.bookings=r.bookings.filter(b=>b.date===today());return r}}catch(e){}return{user:null,bookings:[]}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+const todays=()=>S.bookings.filter(b=>b.date===today()).sort((a,b)=>a.start-b.start);
+const active=()=>{const n=nowMin();return todays().find(b=>b.start<=n&&n<b.end)};
+const conflict=(s,e)=>todays().some(b=>s<b.end&&e>b.start);
+const isStudent=()=>S.user&&S.user.role==="student";
+
+function toast(msg){const t=document.getElementById("toast");t.innerHTML='<div class="fade card px-4 py-3 text-sm shadow-lg">'+esc(msg)+'</div>';clearTimeout(toast.t);toast.t=setTimeout(()=>t.innerHTML="",3200)}
+
+function render(){
+  const el=document.getElementById("app");
+  el.innerHTML=S.user?dashView():loginView();
+}
+
+function loginView(){return `
+<div class="fade min-h-[80vh] flex items-center justify-center">
+ <div class="card w-full max-w-md p-8 shadow-sm">
+  <div class="text-4xl mb-3">🏛️</div>
+  <h1 class="text-2xl font-bold tracking-tight">Campus Room Hub</h1>
+  <p class="mute mt-1 mb-6">See if a space is free, grab it, or reserve it for later. No more room conflicts.</p>
+  <label class="text-sm font-medium">Student ID</label>
+  <input id="sid" class="inp mt-1 mb-3" inputmode="numeric" placeholder="e.g. 20241234" maxlength="10">
+  <label class="text-sm font-medium">Name <span class="mute font-normal">(optional)</span></label>
+  <input id="sname" class="inp mt-1 mb-4" placeholder="Your name">
+  <button class="btn btn-primary w-full" onclick="login()">Log In with Student ID</button>
+  <div class="flex items-center gap-3 my-4 mute text-xs"><div class="flex-1 h-px" style="background:var(--line)"></div>or<div class="flex-1 h-px" style="background:var(--line)"></div></div>
+  <button class="btn w-full" onclick="guest()">Continue as Guest</button>
+  <p class="mute text-xs mt-4 text-center">Guests can view availability only. Log in to book.</p>
+ </div>
+</div>`}
+
+function login(){
+  const id=document.getElementById("sid").value.trim(), nm=document.getElementById("sname").value.trim();
+  if(!/^\d{6,10}$/.test(id)){toast("Enter a valid Student ID (6–10 digits).");return}
+  S.user={role:"student",id,name:nm||("Student "+id)};save();render();
+}
+function guest(){S.user={role:"guest",id:"guest",name:"Guest"};save();render()}
+function logout(){S.user=null;save();render()}
+
+function dashView(){
+  const n=nowMin(),a=active(),list=todays().filter(b=>b.end>n),nx=list.find(b=>b.start>n);
+  const can=isStudent(), mine=a&&a.uid===S.user.id&&can;
+  const free=!a;
+  const sub=free?(nx?"Free until "+fmt(nx.start):"Free for the rest of the day"):esc(a.name)+" · "+esc(a.purpose)+" · until "+fmt(a.end);
+  const rows=list.map(b=>{
+    const live=b.start<=n;
+    const own=can&&b.uid===S.user.id;
+    return `<tr class="border-t" style="border-color:var(--line)">
+      <td class="py-3 pr-3 whitespace-nowrap font-medium">${fmt(b.start)} – ${fmt(b.end)}</td>
+      <td class="py-3 pr-3">${esc(b.name)}${own?' <span class="mute text-xs">(you)</span>':""}</td>
+      <td class="py-3 pr-3">${esc(b.purpose)}</td>
+      <td class="py-3 pr-3"><span class="badge" style="background:${live?"var(--busy-bg)":"var(--ok-bg)"};color:${live?"var(--busy)":"var(--ok)"}">${live?"In use":"Upcoming"}</span></td>
+      <td class="py-3 text-right">${own?`<button class="text-sm underline mute hover:opacity-70" onclick="removeB('${b.id}')">${live?"Free":"Cancel"}</button>`:""}</td></tr>`}).join("");
+  return `
+<div class="fade">
+ <header class="flex items-center justify-between mb-6 gap-3">
+  <div><div class="text-sm mute">Campus Room Hub</div><h1 class="text-xl sm:text-2xl font-bold tracking-tight">${ROOM}</h1></div>
+  <div class="flex items-center gap-2">
+   <span class="text-sm hidden sm:inline">${esc(S.user.name)}${can?"":' <span class="badge" style="background:var(--line)">View only</span>'}</span>
+   <button class="btn !py-2 !px-3 text-sm" onclick="logout()">${can?"Log out":"Sign in"}</button>
+  </div>
+ </header>
+
+ <section class="rounded-2xl p-6 sm:p-8 mb-5 border transition-colors duration-300" style="background:${free?"var(--ok-bg)":"var(--busy-bg)"};border-color:${free?"var(--ok)":"var(--busy)"}">
+  <div class="flex items-center gap-3 text-2xl sm:text-3xl font-bold" style="color:${free?"var(--ok)":"var(--busy)"}">
+   <span class="pulse">${free?"🟢":"🔴"}</span>${free?"Available":"Occupied"}
+  </div>
+  <p class="mt-2 text-base sm:text-lg">${sub}</p>
+ </section>
+
+ <section class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-2">
+  <button class="btn btn-primary" ${can&&free?"":"disabled"} onclick="openUse()">⚡ Use Right Now</button>
+  <button class="btn" ${can?"":"disabled"} onclick="openReserve()">🗓️ Reserve for Later</button>
+  <button class="btn btn-danger" ${mine?"":"disabled"} onclick="removeB('${a?a.id:""}')">✖ Cancel / Free Room</button>
+ </section>
+ <p class="text-xs mute mb-6">${can?(a&&!mine?"Only the person using the room can free it.":"Rooms are bookable today between 8:00 AM and 10:00 PM."):"You’re browsing as a guest. Log in with your Student ID to book."}</p>
+
+ <section class="card p-5 sm:p-6">
+  <div class="flex items-baseline justify-between mb-3"><h2 class="font-semibold text-lg">Today’s Schedule</h2><span class="text-sm mute">${new Date().toLocaleDateString(undefined,{weekday:"long",month:"short",day:"numeric"})}</span></div>
+  ${list.length?`<div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="mute text-xs uppercase"><tr><th class="pb-2 pr-3">Time</th><th class="pb-2 pr-3">Booked by</th><th class="pb-2 pr-3">Purpose</th><th class="pb-2 pr-3">Status</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:`<p class="mute py-6 text-center">Nothing booked for the rest of today. The room is wide open. ✨</p>`}
+ </section>
+</div>`}
+
+function modal(html){document.getElementById("modal").innerHTML=`<div class="fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4" style="background:rgba(0,0,0,.45)" onclick="if(event.target===this)closeModal()"><div class="fade card w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" style="border-bottom-left-radius:0;border-bottom-right-radius:0">${html}</div></div>`}
+function closeModal(){document.getElementById("modal").innerHTML=""}
+const durOpts=sel=>[30,60,90,120].map(d=>`<option value="${d}" ${d===sel?"selected":""}>${d<60?d+" min":d/60+(d===60?" hour":" hours")}</option>`).join("");
+
+function openUse(){
+  if(!isStudent())return;
+  modal(`<h3 class="text-lg font-bold mb-1">Use the room now</h3><p class="mute text-sm mb-4">Starts immediately under your name.</p>
+  <label class="text-sm font-medium">Purpose</label><input id="purpose" class="inp mt-1 mb-3" placeholder="e.g. Group study, thesis work">
+  <label class="text-sm font-medium">How long?</label><select id="dur" class="inp mt-1 mb-5">${durOpts(60)}</select>
+  <div class="flex gap-2"><button class="btn flex-1" onclick="closeModal()">Back</button><button class="btn btn-primary flex-1" onclick="confirmUse()">Occupy room</button></div>`);
+}
+function confirmUse(){
+  const n=nowMin();if(active()){toast("The room was just taken.");closeModal();render();return}
+  const dur=+document.getElementById("dur").value, purpose=document.getElementById("purpose").value.trim()||"Study session";
+  const nx=todays().find(b=>b.start>n);
+  if(nx&&nx.start-n<15){toast("A reservation starts at "+fmt(nx.start)+". Too soon to start now.");return}
+  const end=Math.min(n+dur,nx?nx.start:1440);
+  S.bookings.push({id:String(Date.now()),date:today(),start:n,end,uid:S.user.id,name:S.user.name,purpose,type:"now"});
+  save();closeModal();render();toast("Room is yours until "+fmt(end)+".");
+}
+
+let R={start:null,dur:60};
+function openReserve(){
+  if(!isStudent())return;R={start:null,dur:60};
+  modal(`<h3 class="text-lg font-bold mb-1">Reserve for later</h3><p class="mute text-sm mb-4">Pick a start time. Taken slots are disabled.</p>
+  <label class="text-sm font-medium">Duration</label><select id="rdur" class="inp mt-1 mb-4" onchange="R.dur=+this.value;R.start=null;drawSlots()">${durOpts(60)}</select>
+  <div id="slots" class="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-4"></div>
+  <label class="text-sm font-medium">Purpose</label><input id="rpurpose" class="inp mt-1 mb-5" placeholder="e.g. Study group for Calculus">
+  <div class="flex gap-2"><button class="btn flex-1" onclick="closeModal()">Back</button><button id="rok" class="btn btn-primary flex-1" disabled onclick="confirmReserve()">Reserve</button></div>`);
+  drawSlots();
+}
+function drawSlots(){
+  const n=nowMin();let h="";
+  for(let s=480;s<1320;s+=30){
+    const bad=s<n||s+R.dur>1320||conflict(s,s+R.dur);
+    h+=`<button class="slot ${R.start===s?"sel":""}" ${bad?"disabled":""} onclick="R.start=${s};drawSlots()">${fmt(s)}</button>`;
+  }
+  document.getElementById("slots").innerHTML=h;
+  document.getElementById("rok").disabled=R.start===null;
+  document.getElementById("rok").textContent=R.start===null?"Reserve":"Reserve "+fmt(R.start)+" – "+fmt(R.start+R.dur);
+}
+function confirmReserve(){
+  const s=R.start,e=s+R.dur;
+  if(conflict(s,e)){toast("That slot was just taken. Pick another.");drawSlots();return}
+  S.bookings.push({id:String(Date.now()),date:today(),start:s,end:e,uid:S.user.id,name:S.user.name,purpose:document.getElementById("rpurpose").value.trim()||"Study session",type:"reserve"});
+  save();closeModal();render();toast("Reserved "+fmt(s)+" – "+fmt(e)+".");
+}
+function removeB(id){
+  const b=S.bookings.find(x=>x.id===id);
+  if(!b||!isStudent()||b.uid!==S.user.id)return;
+  S.bookings=S.bookings.filter(x=>x.id!==id);save();render();toast(b.start<=nowMin()?"Room freed.":"Reservation cancelled.");
+}
+window.addEventListener("storage",render);
+setInterval(render,30000);
+render();
+</script>
+</body>
+</html>
